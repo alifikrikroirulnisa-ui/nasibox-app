@@ -87,7 +87,7 @@ export default function Home() {
               Nasi Box Berkualitas untuk Setiap Momen Spesial Anda
             </h2>
             <p className="text-lg text-gray-600 mb-8">
-              Bapak/Ibu yang akan mengadakan buku ber, tidak perlu repot masak. Kami siap membantu memenuhi kebutuhan nasi box, insyaAllah amanah 🙏
+              Bapak/Ibu yang akan mengadakan Acara, tidak perlu repot masak. Kami siap membantu memenuhi kebutuhan nasi box, insyaAllah amanah 😊🙏
             </p>
           </div>
 
