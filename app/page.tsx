@@ -255,8 +255,9 @@ export default function Home() {
             {/* System Info */}
             <div className="border-t border-gray-700 pt-8 md:pt-0 md:border-t-0">
               <div className="bg-gray-900 p-6 rounded-lg">
-                <p className="text-sm text-gray-400 mb-2">System v1.0 MVP</p>
-                <p className="text-sm text-gray-400">Created for: Nanang Budiyanto</p>
+                <p className="text-sm text-gray-400 mb-2">System v3.0 Nasibox.andalan</p>
+                <p className="text-sm text-gray-400">Created By: Gum</p>
+		<p className="text-sm text-gray-400">admin</p>
                 <div className="mt-4">
                   <Link href="/login" className="inline-block bg-amber-600 text-white px-4 py-2 rounded hover:bg-amber-700 transition text-sm">
                     Login Sistem
