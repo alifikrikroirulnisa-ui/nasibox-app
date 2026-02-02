@@ -16,7 +16,7 @@ export default function LoginPage() {
     setMsg('');
 
     // 1. Proses Login ke Supabase Auth
-    const { data: { user }, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -27,25 +27,18 @@ export default function LoginPage() {
       return;
     }
 
-    if (user) {
-      // 2. Cek Role dia (Principal atau Vendor?)
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      // 3. Arahkan sesuai Role
-      if (profile?.role === 'principal') {
-        router.push('/dashboard/principal');
-      } else {
-        router.push('/dashboard/vendor');
-      }
+    // 2. LOGIKA SIMPLE: Cek Email Admin
+    // Pastikan email di bawah ini SAMA PERSIS dengan email login Anda
+    if (email === 'nasibox.andalan@gmail.com') {
+      router.push('/dashboard/principal');
+    } else {
+      // Email selain admin akan dianggap vendor
+      router.push('/dashboard/vendor');
     }
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-gray-100 p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gray-100 p-4">
       <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
         <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Login Nasi Box</h2>
         
@@ -72,14 +65,14 @@ export default function LoginPage() {
             />
           </div>
 
-          {msg && <p className="text-red-500 text-sm text-center">{msg}</p>}
+          {msg && <p className="text-red-500 text-sm text-center font-bold">{msg}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50"
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200 disabled:bg-gray-400"
           >
-            {loading ? 'Memproses...' : 'Masuk'}
+            {loading ? 'Sedang Masuk...' : 'Masuk'}
           </button>
         </form>
       </div>
