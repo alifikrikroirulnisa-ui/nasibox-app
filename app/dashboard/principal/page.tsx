@@ -10,14 +10,14 @@ export default function CreateOrder() {
     customer_name: '',
     customer_phone: '',
     delivery_date: '',
-    delivery_time: '',
-    product_name: '', // Ditambahkan input field-nya di bawah
+    delivery_time: '', // Field ini tetap ada untuk Input Form, tapi tidak akan dikirim mentah ke DB
+    product_name: '',
     quantity: 0,
     unit_price: 0,
     notes: ''
   });
 
-  // Logika Auto-Calculate Komisi (Tetap 10% sesuai request)
+  // Logika Auto-Calculate Komisi
   const totalPrice = formData.quantity * formData.unit_price;
   const commission = totalPrice * 0.10; 
   const netToVendor = totalPrice - commission;
@@ -26,17 +26,30 @@ export default function CreateOrder() {
     e.preventDefault();
     setLoading(true);
 
-    // Insert ke Supabase (Struktur tabel TIDAK BERUBAH)
+    // --- BAGIAN PERBAIKAN START ---
+    
+    // 1. Gabungkan Jam ke dalam Notes
+    const combinedNotes = `[Jam Kirim: ${formData.delivery_time}] ${formData.notes}`;
+
+    // 2. Pisahkan 'delivery_time' dari data yang akan dikirim (agar tidak error column not found)
+    // Kita ambil sisa data (cleanData) selain delivery_time
+    const { delivery_time, ...cleanData } = formData;
+
+    // 3. Kirim ke Supabase
     const { error } = await supabase.from('orders').insert([{
-      ...formData,
+      ...cleanData,           // Data form tanpa delivery_time
+      notes: combinedNotes,   // Notes yang sudah digabung dengan jam
       total_price: totalPrice,
       principal_commission: commission,
       vendor_net_amount: netToVendor,
       status: 'new' 
     }]);
 
+    // --- BAGIAN PERBAIKAN END ---
+
     if (error) {
       alert('Gagal membuat order: ' + error.message);
+      console.error(error); // Cek console browser jika masih gagal
     } else {
       alert('Order berhasil dibuat!');
       router.push('/dashboard/principal');
@@ -46,7 +59,7 @@ export default function CreateOrder() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      {/* Header Halaman (Meniru style dashboard header) */}
+      {/* Header Halaman */}
       <div className="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between mb-6 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
           <span className="text-orange-500">🛒</span> Buat Order Baru
