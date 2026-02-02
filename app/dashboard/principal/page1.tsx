@@ -31,7 +31,7 @@ export default function CreateOrder() {
     setLoading(true);
 
     try {
-      // 1. Ambil user ID yang sedang login
+      // 1. Ambil user ID yang sedang login (untuk created_by)
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
@@ -48,63 +48,52 @@ export default function CreateOrder() {
         subtotal: totalAmount
       }];
 
-      // 3. Format waktu dengan detik (HH:MM:SS)
-      const timeWithSeconds = formData.delivery_time.includes(':') && formData.delivery_time.split(':').length === 2
-        ? `${formData.delivery_time}:00`
-        : formData.delivery_time || '12:00:00';
+      // 3. Gabungkan delivery_time ke dalam delivery_notes
+      const finalDeliveryNotes = formData.delivery_time 
+        ? `[Jam Kirim: ${formData.delivery_time}] ${formData.delivery_notes || ''}`
+        : formData.delivery_notes || '';
 
-      // 4. Gabungkan notes
-      const finalNotes = formData.notes || null;
-      const finalDeliveryNotes = formData.delivery_notes || null;
-
-      // 5. Data yang akan dikirim - HANYA field yang PASTI ada berdasarkan schema
-      const orderData = {
-        // Customer Info (required)
+      // 4. Kirim ke Supabase dengan struktur yang BENAR
+      const { error } = await supabase.from('orders').insert([{
+        // Customer Info
         customer_name: formData.customer_name,
         customer_phone: formData.customer_phone,
         customer_email: formData.customer_email || null,
         
-        // Delivery Information (required)
+        // Delivery Information
         delivery_date: formData.delivery_date,
-        delivery_time: timeWithSeconds,
+        delivery_time: formData.delivery_time || '12:00:00', // Default jika kosong
         delivery_address: formData.delivery_address,
+        delivery_lat: null, // Bisa diisi nanti jika ada fitur maps
+        delivery_lng: null,
         delivery_notes: finalDeliveryNotes,
         
-        // Order Details (required)
+        // Order Details (JSONB format)
         items: itemsData,
         total_amount: totalAmount,
-        notes: finalNotes,
+        notes: formData.notes || null,
         
-        // Status (required)
+        // Status & Assignment
         status: 'new',
+        assigned_vendor_id: null,
         
-        // Commission
+        // Komisi (akan auto-calculate di DB karena GENERATED ALWAYS)
         commission_pct: commissionPct,
         
-        // Created by
+        // Metadata
         created_by: user.id
-      };
-
-      console.log('🔍 Data yang akan dikirim:', orderData);
-
-      // 6. Insert ke database
-      const { data, error } = await supabase
-        .from('orders')
-        .insert([orderData])
-        .select();
+      }]);
 
       if (error) {
-        console.error('❌ Error detail:', error);
         throw error;
       }
 
-      console.log('✅ Berhasil membuat order:', data);
       alert('✅ Order berhasil dibuat!');
       router.push('/dashboard/principal');
       
     } catch (error: any) {
-      console.error('❌ Full error:', error);
-      alert(`❌ Gagal membuat order: ${error.message}\n\nCek console browser (F12) untuk detail.`);
+      alert('❌ Gagal membuat order: ' + error.message);
+      console.error('Error detail:', error);
     } finally {
       setLoading(false);
     }
@@ -248,21 +237,7 @@ export default function CreateOrder() {
                   </div>
                 </div>
 
-                {/* Catatan Pengiriman */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Catatan Pengiriman (Opsional)
-                  </label>
-                  <textarea 
-                    rows={2} 
-                    placeholder="Cth: Rumah cat hijau, sebelah warung..."
-                    value={formData.delivery_notes}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, delivery_notes: e.target.value})} 
-                  />
-                </div>
-
-                {/* Catatan Umum */}
+                {/* Catatan */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-600 mb-1">
                     Catatan Tambahan (Opsional)
