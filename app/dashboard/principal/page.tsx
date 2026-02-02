@@ -48,16 +48,19 @@ export default function CreateOrder() {
         subtotal: totalAmount
       }];
 
-      // 3. Format waktu dengan detik (HH:MM:SS)
-      const timeWithSeconds = formData.delivery_time.includes(':') && formData.delivery_time.split(':').length === 2
-        ? `${formData.delivery_time}:00`
-        : formData.delivery_time || '12:00:00';
+      // 3. Gabungkan delivery_time ke dalam delivery_notes
+      // Format: [Jam: 16:00] Catatan user...
+      let finalDeliveryNotes = '';
+      if (formData.delivery_time) {
+        finalDeliveryNotes = `[Jam Kirim: ${formData.delivery_time}]`;
+        if (formData.delivery_notes) {
+          finalDeliveryNotes += ` ${formData.delivery_notes}`;
+        }
+      } else {
+        finalDeliveryNotes = formData.delivery_notes || null;
+      }
 
-      // 4. Gabungkan notes
-      const finalNotes = formData.notes || null;
-      const finalDeliveryNotes = formData.delivery_notes || null;
-
-      // 5. Data yang akan dikirim - HANYA field yang PASTI ada berdasarkan schema
+      // 4. Data yang akan dikirim - TANPA delivery_time
       const orderData = {
         // Customer Info (required)
         customer_name: formData.customer_name,
@@ -66,14 +69,15 @@ export default function CreateOrder() {
         
         // Delivery Information (required)
         delivery_date: formData.delivery_date,
-        delivery_time: timeWithSeconds,
         delivery_address: formData.delivery_address,
-        delivery_notes: finalDeliveryNotes,
+        delivery_notes: finalDeliveryNotes, // Jam kirim sudah digabung di sini
+        delivery_lat: null,
+        delivery_lng: null,
         
         // Order Details (required)
         items: itemsData,
         total_amount: totalAmount,
-        notes: finalNotes,
+        notes: formData.notes || null,
         
         // Status (required)
         status: 'new',
@@ -87,7 +91,7 @@ export default function CreateOrder() {
 
       console.log('🔍 Data yang akan dikirim:', orderData);
 
-      // 6. Insert ke database
+      // 5. Insert ke database
       const { data, error } = await supabase
         .from('orders')
         .insert([orderData])
@@ -198,7 +202,7 @@ export default function CreateOrder() {
                   <input 
                     type="text" 
                     required 
-                    placeholder="Contoh: Nasi Mujair Bakar"
+                    placeholder="Contoh: Nasi Ayam Bakar"
                     value={formData.product_name}
                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition" 
                     onChange={(e) => setFormData({...formData, product_name: e.target.value})} 
@@ -245,6 +249,9 @@ export default function CreateOrder() {
                       className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
                       onChange={(e) => setFormData({...formData, delivery_time: e.target.value})} 
                     />
+                    <p className="text-xs text-slate-400 mt-1">
+                      💡 Jam akan disimpan di catatan pengiriman
+                    </p>
                   </div>
                 </div>
 
