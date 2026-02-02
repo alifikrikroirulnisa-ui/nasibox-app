@@ -31,7 +31,7 @@ export default function CreateOrder() {
     setLoading(true);
 
     try {
-      // 1. Ambil user ID yang sedang login (untuk created_by)
+      // 1. Ambil user ID yang sedang login
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
@@ -49,51 +49,66 @@ export default function CreateOrder() {
       }];
 
       // 3. Gabungkan delivery_time ke dalam delivery_notes
-      const finalDeliveryNotes = formData.delivery_time 
-        ? `[Jam Kirim: ${formData.delivery_time}] ${formData.delivery_notes || ''}`
-        : formData.delivery_notes || '';
+      // Format: [Jam: 16:00] Catatan user...
+      let finalDeliveryNotes: string | null = null;
+      if (formData.delivery_time) {
+        finalDeliveryNotes = `[Jam Kirim: ${formData.delivery_time}]`;
+        if (formData.delivery_notes) {
+          finalDeliveryNotes += ` ${formData.delivery_notes}`;
+        }
+      } else {
+        finalDeliveryNotes = formData.delivery_notes || null;
+      }
 
-      // 4. Kirim ke Supabase dengan struktur yang BENAR
-      const { error } = await supabase.from('orders').insert([{
-        // Customer Info
+      // 4. Data yang akan dikirim - TANPA delivery_time
+      const orderData = {
+        // Customer Info (required)
         customer_name: formData.customer_name,
         customer_phone: formData.customer_phone,
         customer_email: formData.customer_email || null,
         
-        // Delivery Information
+        // Delivery Information (required)
         delivery_date: formData.delivery_date,
-        delivery_time: formData.delivery_time || '12:00:00', // Default jika kosong
         delivery_address: formData.delivery_address,
-        delivery_lat: null, // Bisa diisi nanti jika ada fitur maps
+        delivery_notes: finalDeliveryNotes, // Jam kirim sudah digabung di sini
+        delivery_lat: null,
         delivery_lng: null,
-        delivery_notes: finalDeliveryNotes,
         
-        // Order Details (JSONB format)
+        // Order Details (required)
         items: itemsData,
         total_amount: totalAmount,
         notes: formData.notes || null,
         
-        // Status & Assignment
+        // Status (required)
         status: 'new',
-        assigned_vendor_id: null,
         
-        // Komisi (akan auto-calculate di DB karena GENERATED ALWAYS)
+        // Commission
         commission_pct: commissionPct,
         
-        // Metadata
+        // Created by
         created_by: user.id
-      }]);
+      };
+
+      console.log('🔍 Data yang akan dikirim:', orderData);
+
+      // 5. Insert ke database
+      const { data, error } = await supabase
+        .from('orders')
+        .insert([orderData])
+        .select();
 
       if (error) {
+        console.error('❌ Error detail:', error);
         throw error;
       }
 
+      console.log('✅ Berhasil membuat order:', data);
       alert('✅ Order berhasil dibuat!');
       router.push('/dashboard/principal');
       
     } catch (error: any) {
-      alert('❌ Gagal membuat order: ' + error.message);
-      console.error('Error detail:', error);
+      console.error('❌ Full error:', error);
+      alert(`❌ Gagal membuat order: ${error.message}\n\nCek console browser (F12) untuk detail.`);
     } finally {
       setLoading(false);
     }
@@ -187,7 +202,7 @@ export default function CreateOrder() {
                   <input 
                     type="text" 
                     required 
-                    placeholder="Contoh: Nasi Mujair Bakar"
+                    placeholder="Contoh: Nasi Ayam Bakar"
                     value={formData.product_name}
                     className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition" 
                     onChange={(e) => setFormData({...formData, product_name: e.target.value})} 
@@ -234,10 +249,27 @@ export default function CreateOrder() {
                       className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
                       onChange={(e) => setFormData({...formData, delivery_time: e.target.value})} 
                     />
+                    <p className="text-xs text-slate-400 mt-1">
+                      💡 Jam akan disimpan di catatan pengiriman
+                    </p>
                   </div>
                 </div>
 
-                {/* Catatan */}
+                {/* Catatan Pengiriman */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-600 mb-1">
+                    Catatan Pengiriman (Opsional)
+                  </label>
+                  <textarea 
+                    rows={2} 
+                    placeholder="Cth: Rumah cat hijau, sebelah warung..."
+                    value={formData.delivery_notes}
+                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
+                    onChange={(e) => setFormData({...formData, delivery_notes: e.target.value})} 
+                  />
+                </div>
+
+                {/* Catatan Umum */}
                 <div>
                   <label className="block text-sm font-semibold text-slate-600 mb-1">
                     Catatan Tambahan (Opsional)

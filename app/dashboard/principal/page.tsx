@@ -1,372 +1,358 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabaseClient';
 import { useRouter } from 'next/navigation';
 
-export default function CreateOrder() {
+interface Order {
+  id: number;
+  customer_name: string;
+  delivery_date: string;
+  total_amount: number;
+  status: string;
+  assigned_vendor_id: string | null;
+  created_at: string;
+}
+
+interface Vendor {
+  id: string;
+  full_name: string;
+}
+
+export default function DashboardPrincipal() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    customer_name: '',
-    customer_phone: '',
-    customer_email: '',
-    delivery_date: '',
-    delivery_time: '',
-    delivery_address: '',
-    delivery_notes: '',
-    product_name: '',
-    quantity: 0,
-    unit_price: 0,
-    notes: ''
-  });
+  const [loading, setLoading] = useState(true);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  
+  // Stats
+  const [totalOrders, setTotalOrders] = useState(0);
+  const [newOrders, setNewOrders] = useState(0);
+  const [completedOrders, setCompletedOrders] = useState(0);
+  const [activeVendors, setActiveVendors] = useState(0);
+  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [totalCommission, setTotalCommission] = useState(0);
 
-  // Logika Auto-Calculate Komisi
-  const totalAmount = formData.quantity * formData.unit_price;
-  const commissionPct = 10;
-  const commissionAmount = totalAmount * (commissionPct / 100);
-  const netVendorAmount = totalAmount - commissionAmount;
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
+  const fetchDashboardData = async () => {
     try {
-      // 1. Ambil user ID yang sedang login
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      if (!user) {
-        alert('Anda harus login terlebih dahulu!');
-        setLoading(false);
-        return;
-      }
-
-      // 2. Siapkan data items dalam format JSONB
-      const itemsData = [{
-        name: formData.product_name,
-        quantity: formData.quantity,
-        unit_price: formData.unit_price,
-        subtotal: totalAmount
-      }];
-
-      // 3. Gabungkan delivery_time ke dalam delivery_notes
-      // Format: [Jam: 16:00] Catatan user...
-      let finalDeliveryNotes: string | null = null;
-      if (formData.delivery_time) {
-        finalDeliveryNotes = `[Jam Kirim: ${formData.delivery_time}]`;
-        if (formData.delivery_notes) {
-          finalDeliveryNotes += ` ${formData.delivery_notes}`;
-        }
-      } else {
-        finalDeliveryNotes = formData.delivery_notes || null;
-      }
-
-      // 4. Data yang akan dikirim - TANPA delivery_time
-      const orderData = {
-        // Customer Info (required)
-        customer_name: formData.customer_name,
-        customer_phone: formData.customer_phone,
-        customer_email: formData.customer_email || null,
-        
-        // Delivery Information (required)
-        delivery_date: formData.delivery_date,
-        delivery_address: formData.delivery_address,
-        delivery_notes: finalDeliveryNotes, // Jam kirim sudah digabung di sini
-        delivery_lat: null,
-        delivery_lng: null,
-        
-        // Order Details (required)
-        items: itemsData,
-        total_amount: totalAmount,
-        notes: formData.notes || null,
-        
-        // Status (required)
-        status: 'new',
-        
-        // Commission
-        commission_pct: commissionPct,
-        
-        // Created by
-        created_by: user.id
-      };
-
-      console.log('🔍 Data yang akan dikirim:', orderData);
-
-      // 5. Insert ke database
-      const { data, error } = await supabase
+      // Fetch orders
+      const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
-        .insert([orderData])
-        .select();
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      if (error) {
-        console.error('❌ Error detail:', error);
-        throw error;
-      }
+      if (ordersError) throw ordersError;
 
-      console.log('✅ Berhasil membuat order:', data);
-      alert('✅ Order berhasil dibuat!');
-      router.push('/dashboard/principal');
+      setOrders(ordersData || []);
+
+      // Calculate stats
+      const all = ordersData || [];
+      setTotalOrders(all.length);
+      setNewOrders(all.filter(o => o.status === 'new').length);
+      setCompletedOrders(all.filter(o => o.status === 'completed').length);
       
-    } catch (error: any) {
-      console.error('❌ Full error:', error);
-      alert(`❌ Gagal membuat order: ${error.message}\n\nCek console browser (F12) untuk detail.`);
+      // Calculate revenue (only from completed orders)
+      const completed = all.filter(o => o.status === 'completed');
+      const revenue = completed.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+      setTotalRevenue(revenue);
+      setTotalCommission(revenue * 0.10); // 10% commission
+
+      // Fetch vendors
+      const { data: vendorsData, error: vendorsError } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('role', 'vendor');
+
+      if (vendorsError) throw vendorsError;
+
+      setVendors(vendorsData || []);
+      setActiveVendors((vendorsData || []).length);
+
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  const getVendorName = (vendorId: string | null) => {
+    if (!vendorId) return 'Belum di-assign';
+    const vendor = vendors.find(v => v.id === vendorId);
+    return vendor?.full_name || 'Unknown Vendor';
+  };
+
+  const getStatusBadge = (status: string) => {
+    const badges: { [key: string]: { label: string; className: string } } = {
+      'new': { label: 'NEW', className: 'bg-yellow-500 text-white' },
+      'assigned': { label: 'ASSIGNED', className: 'bg-blue-500 text-white' },
+      'production': { label: 'PRODUCTION', className: 'bg-purple-500 text-white' },
+      'delivery': { label: 'DELIVERY', className: 'bg-orange-500 text-white' },
+      'completed': { label: 'SELESAI', className: 'bg-green-500 text-white' },
+      'complaint': { label: 'KOMPLAIN', className: 'bg-red-500 text-white' },
+      'cancelled': { label: 'DIBATAL', className: 'bg-gray-500 text-white' },
+    };
+    const badge = badges[status] || { label: status.toUpperCase(), className: 'bg-gray-400 text-white' };
+    return (
+      <span className={`px-2 py-1 text-xs font-bold rounded ${badge.className}`}>
+        {badge.label}
+      </span>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+          <p className="mt-4 text-slate-600">Memuat dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      {/* Header Halaman */}
-      <div className="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between mb-6 shadow-sm">
-        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <span className="text-orange-500">🛒</span> Buat Order Baru
-        </h1>
-        <button 
-          onClick={() => router.back()}
-          className="text-sm text-slate-500 hover:text-orange-500 font-medium transition"
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <div className="bg-white border-b border-slate-200 px-8 py-5 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-orange-500 text-white p-2 rounded-lg">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800">Dashboard Principal</h1>
+        </div>
+        <button
+          onClick={() => router.push('/dashboard/principal/orders/create')}
+          className="bg-orange-500 text-white px-6 py-2.5 rounded-lg font-semibold hover:bg-orange-600 transition flex items-center gap-2 shadow-md"
         >
-          &larr; Kembali ke Dashboard
+          <span className="text-lg">➕</span> Buat Order Baru
         </button>
       </div>
 
-      <div className="max-w-5xl mx-auto px-6 pb-12">
-        <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* KOLOM KIRI: Informasi Utama Order */}
-          <div className="lg:col-span-2 space-y-6">
-            
-            {/* Card 1: Data Customer */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
-                <h3 className="font-bold text-slate-700">👤 Informasi Pelanggan</h3>
-              </div>
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Nama Customer <span className="text-red-500">*</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    required 
-                    placeholder="Contoh: Haji Said"
-                    value={formData.customer_name}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition" 
-                    onChange={(e) => setFormData({...formData, customer_name: e.target.value})} 
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    No. Telepon <span className="text-red-500">*</span>
-                  </label>
-                  <input 
-                    type="tel" 
-                    required 
-                    placeholder="0812..." 
-                    value={formData.customer_phone}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, customer_phone: e.target.value})} 
-                  />
-                  <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                    Akan di-masking ke vendor
-                  </p>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Email (Opsional)
-                  </label>
-                  <input 
-                    type="email" 
-                    placeholder="customer@email.com"
-                    value={formData.customer_email}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition" 
-                    onChange={(e) => setFormData({...formData, customer_email: e.target.value})} 
-                  />
-                </div>
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {/* Total Order */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-slate-600 font-medium">Total Order</h3>
+              <div className="bg-blue-50 p-2 rounded-lg">
+                <svg className="w-6 h-6 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
               </div>
             </div>
-
-            {/* Card 2: Detail Produk & Pengiriman */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="bg-slate-50 px-6 py-3 border-b border-slate-200">
-                <h3 className="font-bold text-slate-700">📦 Detail Pesanan</h3>
-              </div>
-              <div className="p-6 space-y-4">
-                {/* Produk */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Nama Produk <span className="text-red-500">*</span>
-                  </label>
-                  <input 
-                    type="text" 
-                    required 
-                    placeholder="Contoh: Nasi Ayam Bakar"
-                    value={formData.product_name}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition" 
-                    onChange={(e) => setFormData({...formData, product_name: e.target.value})} 
-                  />
-                </div>
-
-                {/* Alamat Pengiriman */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Alamat Pengiriman <span className="text-red-500">*</span>
-                  </label>
-                  <textarea 
-                    rows={2} 
-                    required
-                    placeholder="Contoh: Jl. Sudirman No. 123, RT 02/RW 05, Kelurahan ABC"
-                    value={formData.delivery_address}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, delivery_address: e.target.value})} 
-                  />
-                </div>
-
-                {/* Waktu Kirim */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-600 mb-1">
-                      Tanggal Kirim <span className="text-red-500">*</span>
-                    </label>
-                    <input 
-                      type="date" 
-                      required 
-                      value={formData.delivery_date}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                      onChange={(e) => setFormData({...formData, delivery_date: e.target.value})} 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-slate-600 mb-1">
-                      Jam Kirim <span className="text-red-500">*</span>
-                    </label>
-                    <input 
-                      type="time" 
-                      required 
-                      value={formData.delivery_time}
-                      className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                      onChange={(e) => setFormData({...formData, delivery_time: e.target.value})} 
-                    />
-                    <p className="text-xs text-slate-400 mt-1">
-                      💡 Jam akan disimpan di catatan pengiriman
-                    </p>
-                  </div>
-                </div>
-
-                {/* Catatan Pengiriman */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Catatan Pengiriman (Opsional)
-                  </label>
-                  <textarea 
-                    rows={2} 
-                    placeholder="Cth: Rumah cat hijau, sebelah warung..."
-                    value={formData.delivery_notes}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, delivery_notes: e.target.value})} 
-                  />
-                </div>
-
-                {/* Catatan Umum */}
-                <div>
-                  <label className="block text-sm font-semibold text-slate-600 mb-1">
-                    Catatan Tambahan (Opsional)
-                  </label>
-                  <textarea 
-                    rows={2} 
-                    placeholder="Cth: Jangan terlalu pedas, minta sendok plastik..."
-                    value={formData.notes}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, notes: e.target.value})} 
-                  />
-                </div>
-              </div>
-            </div>
+            <p className="text-3xl font-bold text-slate-800">{totalOrders}</p>
           </div>
 
-          {/* KOLOM KANAN: Kalkulasi Harga */}
-          <div className="lg:col-span-1 space-y-6">
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden sticky top-6">
-              <div className="bg-orange-50 px-6 py-3 border-b border-orange-100">
-                <h3 className="font-bold text-orange-700 flex items-center gap-2">
-                  💰 Kalkulasi Harga
-                </h3>
+          {/* Order Baru */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-slate-600 font-medium">Order Baru</h3>
+              <div className="bg-yellow-50 p-2 rounded-lg">
+                <svg className="w-6 h-6 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
               </div>
-              
-              <div className="p-6 space-y-5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
-                    Jumlah Box
-                  </label>
-                  <input 
-                    type="number" 
-                    required 
-                    min="1" 
-                    placeholder="0"
-                    value={formData.quantity || ''}
-                    className="w-full p-2.5 border border-slate-300 rounded-lg text-lg font-bold text-slate-700 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                    onChange={(e) => setFormData({...formData, quantity: Number(e.target.value)})} 
-                  />
-                </div>
+            </div>
+            <p className="text-3xl font-bold text-slate-800">{newOrders}</p>
+          </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">
-                    Harga Satuan (Rp)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-3 text-slate-400 font-medium">Rp</span>
-                    <input 
-                      type="number" 
-                      required 
-                      min="0" 
-                      placeholder="0"
-                      value={formData.unit_price || ''}
-                      className="w-full p-2.5 pl-10 border border-slate-300 rounded-lg text-lg font-bold text-slate-700 focus:ring-2 focus:ring-orange-200 focus:border-orange-500 outline-none transition"
-                      onChange={(e) => setFormData({...formData, unit_price: Number(e.target.value)})} 
-                    />
-                  </div>
-                </div>
+          {/* Selesai */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-slate-600 font-medium">Selesai</h3>
+              <div className="bg-green-50 p-2 rounded-lg">
+                <svg className="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-slate-800">{completedOrders}</p>
+          </div>
 
-                <div className="pt-4 border-t border-dashed border-slate-300">
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-slate-500 text-sm">Total Omset</span>
-                    <span className="text-xl font-bold text-slate-800">
-                      Rp {totalAmount.toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                  <p className="text-xs text-right text-slate-400">Total yang ditagihkan ke customer</p>
-                </div>
+          {/* Vendor Aktif */}
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-slate-600 font-medium">Vendor Aktif</h3>
+              <div className="bg-purple-50 p-2 rounded-lg">
+                <svg className="w-6 h-6 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg>
+              </div>
+            </div>
+            <p className="text-3xl font-bold text-slate-800">{activeVendors}/{vendors.length}</p>
+          </div>
+        </div>
 
-                {/* Rincian Komisi (Visual Only - Info Internal) */}
-                <div className="bg-slate-50 rounded-lg p-3 space-y-2 border border-slate-200">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-emerald-600 font-semibold">Komisi Principal (10%)</span>
-                    <span className="text-emerald-700 font-bold">
-                      + Rp {commissionAmount.toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-orange-600 font-semibold">Net Vendor</span>
-                    <span className="text-orange-700 font-bold">
-                      Rp {netVendorAmount.toLocaleString('id-ID')}
-                    </span>
-                  </div>
-                </div>
+        {/* Revenue & Commission */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Total Revenue */}
+          <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl shadow-sm border border-orange-200 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <h3 className="text-orange-700 font-bold">Total Revenue</h3>
+            </div>
+            <p className="text-4xl font-bold text-green-700 mb-1">
+              Rp {totalRevenue.toLocaleString('id-ID')}
+            </p>
+            <p className="text-sm text-orange-600">Total penjualan dari order selesai</p>
+          </div>
 
-                <button 
-                  type="submit" 
-                  disabled={loading} 
-                  className="w-full bg-orange-500 text-white py-3 rounded-lg font-bold shadow-md hover:bg-orange-600 hover:shadow-lg disabled:bg-slate-300 disabled:shadow-none transition transform active:scale-95"
+          {/* Total Komisi */}
+          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-sm border border-blue-200 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+              </svg>
+              <h3 className="text-blue-700 font-bold">Total Komisi</h3>
+            </div>
+            <p className="text-4xl font-bold text-blue-700 mb-1">
+              Rp {totalCommission.toLocaleString('id-ID')}
+            </p>
+            <p className="text-sm text-blue-600">Komisi dari order selesai</p>
+          </div>
+        </div>
+
+        {/* Tables Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Order Terbaru */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h3 className="font-bold text-orange-700">Order Terbaru</h3>
+                </div>
+                <button
+                  onClick={() => router.push('/dashboard/principal/orders')}
+                  className="text-sm text-orange-600 hover:text-orange-700 font-medium"
                 >
-                  {loading ? 'Menyimpan Order...' : '✨ Buat Order Sekarang'}
+                  Lihat Semua →
                 </button>
               </div>
+
+              {orders.length === 0 ? (
+                <div className="p-12 text-center">
+                  <svg className="w-16 h-16 text-slate-300 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                  </svg>
+                  <p className="text-slate-500 font-medium">Belum ada order</p>
+                  <p className="text-sm text-slate-400 mt-1">Klik tombol "Buat Order Baru" untuk memulai</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">No. Order</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Customer</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Tanggal Kirim</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Total</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Status</th>
+                        <th className="px-6 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Vendor</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-slate-100">
+                      {orders.slice(0, 5).map((order) => (
+                        <tr key={order.id} className="hover:bg-slate-50 transition cursor-pointer" onClick={() => router.push(`/dashboard/principal/orders/${order.id}`)}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                            NBA{String(order.id).padStart(12, '0')}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                            {order.customer_name}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                            {new Date(order.delivery_date).toLocaleDateString('id-ID', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            })}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">
+                            Rp {(order.total_amount || 0).toLocaleString('id-ID')}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {getStatusBadge(order.status)}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                            {getVendorName(order.assigned_vendor_id)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
 
-        </form>
+          {/* Sidebar */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Pending Payout */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-purple-50 px-6 py-4 border-b border-purple-100">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                  </svg>
+                  <h3 className="font-bold text-purple-700">Pending Payout</h3>
+                </div>
+              </div>
+              <div className="p-6 text-center">
+                <p className="text-slate-500 text-sm">Tidak ada pending payout</p>
+              </div>
+            </div>
+
+            {/* Info Pembayaran */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="bg-orange-50 px-6 py-4 border-b border-orange-100">
+                <div className="flex items-center gap-2">
+                  <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <h3 className="font-bold text-orange-700">Info Pembayaran</h3>
+                </div>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Bank:</p>
+                  <p className="text-slate-900 font-bold">BRI</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">No. Rekening:</p>
+                  <p className="text-slate-900 font-mono font-bold">003501000013561</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">Atas Nama:</p>
+                  <p className="text-slate-900 font-bold">NANANG BUDIYANTO</p>
+                </div>
+                <div className="pt-4 border-t border-slate-200">
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide mb-1">WhatsApp:</p>
+                  <a 
+                    href="https://wa.me/6281229203175" 
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-green-600 hover:text-green-700 font-bold flex items-center gap-1"
+                  >
+                    +6281229203175
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
