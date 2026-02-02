@@ -50,7 +50,7 @@ export default function CreateOrder() {
 
       // 3. Gabungkan delivery_time ke dalam delivery_notes
       // Format: [Jam: 16:00] Catatan user...
-      let finalDeliveryNotes = '';
+      let finalDeliveryNotes: string | null = null;
       if (formData.delivery_time) {
         finalDeliveryNotes = `[Jam Kirim: ${formData.delivery_time}]`;
         if (formData.delivery_notes) {
